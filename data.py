@@ -1,18 +1,12 @@
 import torch
 import tiktoken
-
-batch_size = 32
-block_size = 128
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+from model_config import batch_size, block_size, device
 
 with open('./words.txt', 'r', encoding='utf-8') as f:
     text = f.read()
 
 enc = tiktoken.get_encoding("gpt2")
-tokens = enc.encode(text)
-
-tokens = tokens[:200_000_000]
-
+tokens = enc.encode(text)[:200_000_000]
 data = torch.tensor(tokens, dtype=torch.long)
 
 n = int(0.9 * len(data))

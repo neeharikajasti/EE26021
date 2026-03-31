@@ -1,19 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-import tiktoken
-
-batch_size = 32
-block_size = 128
-max_iters = 200000
-eval_interval = 1000
-learning_rate = 3e-4
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-n_embd = 384
-n_head = 6
-n_layer = 6
-dropout = 0.1
+from model_config import n_embd, n_head, n_layer, dropout, block_size, device
 
 class Head(nn.Module):
     def __init__(self, head_size):
@@ -28,15 +16,12 @@ class Head(nn.Module):
         B, T, C = x.shape
         k = self.key(x)
         q = self.query(x)
-
         wei = q @ k.transpose(-2, -1) * (C ** -0.5)
         wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf'))
         wei = F.softmax(wei, dim=-1)
         wei = self.dropout(wei)
-
         v = self.value(x)
-        out = wei @ v
-        return out
+        return wei @ v
 
 class MultiHeadAttention(nn.Module):
     def __init__(self):
@@ -48,8 +33,7 @@ class MultiHeadAttention(nn.Module):
 
     def forward(self, x):
         out = torch.cat([h(x) for h in self.heads], dim=-1)
-        out = self.dropout(self.proj(out))
-        return out
+        return self.dropout(self.proj(out))
 
 class FeedForward(nn.Module):
     def __init__(self):
@@ -82,39 +66,26 @@ class GPT(nn.Module):
         super().__init__()
         self.token_embedding = nn.Embedding(50257, n_embd)
         self.position_embedding = nn.Embedding(block_size, n_embd)
-
         self.blocks = nn.Sequential(*[Block() for _ in range(n_layer)])
         self.ln_f = nn.LayerNorm(n_embd)
         self.lm_head = nn.Linear(n_embd, 50257)
 
     def forward(self, idx, targets=None):
         B, T = idx.shape
-
         tok_emb = self.token_embedding(idx)
         pos_emb = self.position_embedding(torch.arange(T, device=device))
-        x = tok_emb + pos_emb
-
-        x = self.blocks(x)
-        x = self.ln_f(x)
+        x = self.ln_f(self.blocks(tok_emb + pos_emb))
         logits = self.lm_head(x)
-
         loss = None
         if targets is not None:
-            logits = logits.view(-1, logits.size(-1))
-            targets = targets.view(-1)
-            loss = F.cross_entropy(logits, targets)
-
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
         return logits, loss
 
-    def generate(self, idx, max_new_tokens):
+    def generate(self, idx, max_new_tokens, temperature=1.0):
         for _ in range(max_new_tokens):
-            idx_cond = idx[:, -block_size:]
-            logits, _ = self(idx_cond)
-
-            logits = logits[:, -1, :] / 1.0  # temperature
-
+            logits, _ = self(idx[:, -block_size:])
+            logits = logits[:, -1, :] / temperature
             probs = F.softmax(logits, dim=-1)
             next_token = torch.multinomial(probs, num_samples=1)
-
             idx = torch.cat((idx, next_token), dim=1)
         return idx
